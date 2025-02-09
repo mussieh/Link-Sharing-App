@@ -1,9 +1,9 @@
-import bcrypt from "bcrypt";
+import argon2 from "argon2";
 import jwt from "jsonwebtoken";
 import { generateAccessToken, generateRefreshToken } from "../utils/jwt";
 import { Request, Response, NextFunction } from "express";
 import { addDays } from "date-fns";
-import { COOKIE_MAX_AGE, SALT_ROUNDS } from "../utils/constants";
+import { REFRESH_TOKEN_COOKIE_MAX_AGE } from "../utils/constants";
 import { prisma } from "../db/prisma";
 
 // Helper to update user refresh token and the RefreshToken table
@@ -26,20 +26,21 @@ const updateUserRefreshToken = async (
         });
 
         // Update the User table with the new refresh token
-        prisma.user.update({
+        await prisma.user.update({
             where: { id: userId },
             data: { refreshToken: { connect: { id: refreshTokenEntry.id } } },
         });
     });
 };
 
-// Helper to handle the response and set the refresh token cookie
+// Helper to set only the refresh token in a secure cookie
 const setRefreshTokenCookie = (res: Response, refreshToken: string) => {
+    // Set refresh token in an HTTP-only, secure cookie
     res.cookie("refreshToken", refreshToken, {
         httpOnly: true,
         secure: true,
         sameSite: "strict",
-        maxAge: COOKIE_MAX_AGE,
+        maxAge: REFRESH_TOKEN_COOKIE_MAX_AGE,
     });
 };
 
@@ -59,8 +60,8 @@ export const register = async (
             return next({ statusCode: 409, message: "User already exists" });
         }
 
-        // Hash the password
-        const hashedPassword = await bcrypt.hash(password, 10);
+        // Hash the password using argon2
+        const hashedPassword = await argon2.hash(password);
 
         // Create a new user
         const user = await prisma.user.create({
@@ -71,13 +72,13 @@ export const register = async (
         const accessToken = generateAccessToken(user.id);
         const refreshToken = generateRefreshToken(user.id);
 
-        // Hash the refresh token before storing it in the database
-        const hashedRefreshToken = await bcrypt.hash(refreshToken, SALT_ROUNDS);
+        // Hash the refresh token before storing it in the database using argon2
+        const hashedRefreshToken = await argon2.hash(refreshToken);
 
         // Update user and refresh token
         await updateUserRefreshToken(user.id, hashedRefreshToken);
 
-        // Set refresh token in cookie
+        // Set only the refresh token in the cookie
         setRefreshTokenCookie(res, refreshToken);
 
         res.status(201).json({ accessToken });
@@ -98,7 +99,7 @@ export const login = async (
         // Check if user exists
         const user = await prisma.user.findUnique({ where: { email } });
 
-        if (!user || !(await bcrypt.compare(password, user.hashedPassword))) {
+        if (!user || !(await argon2.verify(user.hashedPassword, password))) {
             return next({ statusCode: 401, message: "Invalid credentials" });
         }
 
@@ -106,13 +107,13 @@ export const login = async (
         const accessToken = generateAccessToken(user.id);
         const refreshToken = generateRefreshToken(user.id);
 
-        // Hash the refresh token before storing it in the database
-        const hashedRefreshToken = await bcrypt.hash(refreshToken, SALT_ROUNDS);
+        // Hash the refresh token before storing it in the database using argon2
+        const hashedRefreshToken = await argon2.hash(refreshToken);
 
         // Update user and refresh token
         await updateUserRefreshToken(user.id, hashedRefreshToken);
 
-        // Set refresh token in cookie
+        // Set only the refresh token in the cookie
         setRefreshTokenCookie(res, refreshToken);
 
         res.json({ accessToken });
@@ -127,15 +128,15 @@ export const refreshToken = async (
     res: Response,
     next: NextFunction
 ) => {
-    const refreshToken = req.cookies.refreshToken;
+    const refreshTokenFromCookie = req.cookies.refreshToken;
 
-    if (!refreshToken) {
+    if (!refreshTokenFromCookie) {
         return next({ statusCode: 401, message: "Unauthorized" });
     }
 
     try {
         const decoded = jwt.verify(
-            refreshToken,
+            refreshTokenFromCookie,
             process.env.JWT_REFRESH_SECRET!
         ) as { userId: string };
 
@@ -150,10 +151,10 @@ export const refreshToken = async (
             return next({ statusCode: 403, message: "Forbidden" });
         }
 
-        // Compare the hashed refresh token from the database with the provided token
-        const isMatch = await bcrypt.compare(
-            refreshToken,
-            user.refreshToken.hashedToken
+        // Compare the hashed refresh token from the database with the provided token using argon2
+        const isMatch = await argon2.verify(
+            user.refreshToken.hashedToken,
+            refreshTokenFromCookie
         );
 
         if (!isMatch) {
@@ -170,8 +171,20 @@ export const refreshToken = async (
             });
         }
 
-        const newAccessToken = generateAccessToken(user.id);
-        res.json({ accessToken: newAccessToken });
+        // Generate new tokens
+        const accessToken = generateAccessToken(user.id);
+        const refreshToken = generateRefreshToken(user.id);
+
+        // Hash the new refresh token before storing it in the database using argon2
+        const hashedRefreshToken = await argon2.hash(refreshToken);
+
+        // Update user and refresh token with the new refresh token
+        await updateUserRefreshToken(user.id, hashedRefreshToken);
+
+        // Set only the refresh token in the cookie
+        setRefreshTokenCookie(res, refreshToken);
+
+        res.json({ accessToken });
     } catch (error) {
         next({ statusCode: 403, message: "Invalid token" });
     }
@@ -197,11 +210,7 @@ export const logout = async (
         // Remove refresh token from the RefreshToken table
         await prisma.refreshToken.delete({ where: { userId: decoded.userId } });
 
-        res.clearCookie("refreshToken", {
-            httpOnly: true,
-            secure: true,
-            sameSite: "strict",
-        });
+        res.clearCookie("refreshToken");
 
         res.json({ message: "Logged out successfully" });
     } catch (error) {

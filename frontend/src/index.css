@@ -1,0 +1,36 @@
+@import "tailwindcss";
+
+@font-face {
+    font-family: "Instrument Sans";
+    font-style: normal;
+    font-weight: 400 700;
+    font-display: swap;
+    src: url("../src//assets/fonts/InstrumentSans-VariableFont_wdth\,wght.ttf")
+        format("truetype");
+}
+
+@config "../tailwind.config.js";
+
+input {
+    caret-color: #633cff;
+}
+
+.text-heading-medium {
+    @apply text-[3.2rem] font-bold leading-[150%];
+}
+
+.text-heading-small {
+    @apply text-[1.6rem] font-bold leading-[150%];
+}
+
+.text-body-medium {
+    @apply text-[1.6rem] font-normal leading-[150%];
+}
+
+.text-body-small {
+    @apply text-[1.2rem] font-normal leading-[150%];
+}
+
+.button-shadow {
+    @apply shadow-[0_0_32px_0_rgba(99,60,255,0.25)];
+}

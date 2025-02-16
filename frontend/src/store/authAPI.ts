@@ -1,23 +1,75 @@
-import { createApi, fetchBaseQuery } from "@reduxjs/toolkit/query/react";
-import { clearAccessToken, setAccessToken } from "./authSlice";
-import { RootState } from "./store";
+import {
+    BaseQueryApi,
+    createApi,
+    FetchArgs,
+    fetchBaseQuery,
+} from "@reduxjs/toolkit/query/react";
+import { BASE_URL } from "../utils/constants";
+import { setIsAuthenticated } from "./authSlice";
 
-export const baseQuery = fetchBaseQuery({
-    baseUrl: "http://localhost:4000/api/v1",
-    prepareHeaders: (headers, { getState }) => {
-        const token = (getState() as RootState).auth.accessToken;
-        if (token) {
-            headers.set("Authorization", `Bearer ${token}`);
-        }
-        return headers;
-    },
-});
+// Define the types for the authentication response and request data
+interface LoginResponse {
+    accessToken: string;
+}
+
+interface LoginCredentials {
+    email: string;
+    password: string;
+}
+
+interface RegisterResponse {
+    accessToken: string;
+}
+
+interface RegisterCredentials {
+    email: string;
+    password: string;
+}
+
+export const customBaseQuery = async (
+    args: string | FetchArgs,
+    api: BaseQueryApi,
+    extraOptions: object
+) => {
+    const baseQuery = fetchBaseQuery({
+        baseUrl: BASE_URL,
+        credentials: "include",
+    });
+
+    // Await the result from baseQuery
+    const result = await baseQuery(args, api, extraOptions);
+
+    // Check for error response
+    if (result.error && result.error.status === 401) {
+        api.dispatch(authApi.endpoints.logout.initiate());
+    }
+
+    return result;
+};
 
 export const authApi = createApi({
     reducerPath: "authApi",
-    baseQuery,
+    baseQuery: customBaseQuery,
     endpoints: (builder) => ({
-        login: builder.mutation({
+        checkAuth: builder.query<boolean, void>({
+            query: () => ({
+                url: "/auth/check",
+                method: "GET",
+            }),
+            async onQueryStarted(_, { dispatch, queryFulfilled }) {
+                try {
+                    await queryFulfilled;
+                    dispatch(setIsAuthenticated(true));
+                } catch (error) {
+                    dispatch(setIsAuthenticated(false));
+                    console.log(
+                        "Authentication check failed, logging out.",
+                        error
+                    );
+                }
+            },
+        }),
+        login: builder.mutation<LoginResponse, LoginCredentials>({
             query: (credentials) => ({
                 url: "/auth/login",
                 method: "POST",
@@ -25,14 +77,15 @@ export const authApi = createApi({
             }),
             async onQueryStarted(_, { dispatch, queryFulfilled }) {
                 try {
-                    const { data } = await queryFulfilled;
-                    dispatch(setAccessToken(data.accessToken));
+                    await queryFulfilled;
+                    dispatch(setIsAuthenticated(true));
                 } catch (error) {
                     console.log(error);
+                    dispatch(setIsAuthenticated(false));
                 }
             },
         }),
-        register: builder.mutation({
+        register: builder.mutation<RegisterResponse, RegisterCredentials>({
             query: (userData) => ({
                 url: "/auth/register",
                 method: "POST",
@@ -40,42 +93,34 @@ export const authApi = createApi({
             }),
             async onQueryStarted(_, { dispatch, queryFulfilled }) {
                 try {
-                    const { data } = await queryFulfilled;
-                    dispatch(setAccessToken(data.accessToken));
+                    await queryFulfilled;
+                    dispatch(setIsAuthenticated(true));
                 } catch (error) {
                     console.log(error);
+                    dispatch(setIsAuthenticated(false));
                 }
             },
         }),
-        refreshToken: builder.mutation({
-            query: () => ({
-                url: "/auth/refresh",
-                method: "POST",
-            }),
-            async onQueryStarted(_, { dispatch, queryFulfilled }) {
-                try {
-                    const { data } = await queryFulfilled;
-                    dispatch(setAccessToken(data.accessToken));
-                } catch (error) {
-                    console.log(error);
-                }
-            },
-        }),
-        logout: builder.mutation({
+        logout: builder.mutation<void, void>({
             query: () => ({
                 url: "/auth/logout",
                 method: "POST",
             }),
-            onQueryStarted(_, { dispatch }) {
-                dispatch(clearAccessToken());
+            async onQueryStarted(_, { dispatch, queryFulfilled }) {
+                try {
+                    await queryFulfilled;
+                    dispatch(setIsAuthenticated(false));
+                } catch (error) {
+                    console.log(error);
+                }
             },
         }),
     }),
 });
 
 export const {
+    useCheckAuthQuery,
     useLoginMutation,
     useRegisterMutation,
-    useRefreshTokenMutation,
     useLogoutMutation,
 } = authApi;

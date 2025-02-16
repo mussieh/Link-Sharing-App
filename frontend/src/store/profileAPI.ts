@@ -1,21 +1,30 @@
 import { createApi } from "@reduxjs/toolkit/query/react";
-import { baseQuery } from "./authAPI";
+
+import { CreateProfilePayload, UpdateProfilePayload } from "../types";
+
+import { customBaseQuery } from "./authAPI";
 
 export const profileApi = createApi({
     reducerPath: "profileApi",
-    baseQuery,
+    baseQuery: customBaseQuery,
     endpoints: (builder) => ({
-        getProfile: builder.query({
+        getProfile: builder.query<CreateProfilePayload, string>({
             query: (userId) => `/profile/${userId}`,
         }),
-        createProfile: builder.mutation({
+        createProfile: builder.mutation<
+            CreateProfilePayload,
+            CreateProfilePayload
+        >({
             query: (profileData) => ({
                 url: "/profile",
                 method: "POST",
                 body: profileData,
             }),
         }),
-        updateProfile: builder.mutation({
+        updateProfile: builder.mutation<
+            UpdateProfilePayload,
+            { profileData: UpdateProfilePayload; userId: string }
+        >({
             query: ({ profileData, userId }) => ({
                 url: `/profile/${userId}`,
                 method: "PUT",

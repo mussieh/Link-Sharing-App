@@ -1,12 +1,13 @@
 import { Router } from "express";
 import {
+    confirmAuthentication,
     login,
     logout,
-    refreshToken,
     register,
 } from "../controllers/auth-controller";
 import rateLimit from "express-rate-limit";
 import { validateRegistrationInput } from "../middleware/validation-middleware";
+import { authenticate } from "../middleware/auth-middleware";
 
 const authLimiter = rateLimit({
     windowMs: 10 * 60 * 1000, // 10 minutes
@@ -18,7 +19,7 @@ const router = Router();
 
 router.post("/register", authLimiter, validateRegistrationInput, register);
 router.post("/login", authLimiter, validateRegistrationInput, login);
-router.post("/refresh", authLimiter, refreshToken);
+router.get("/check", authLimiter, authenticate, confirmAuthentication);
 router.post("/logout", logout);
 
 export default router;

@@ -1,37 +1,47 @@
 import { createApi } from "@reduxjs/toolkit/query/react";
-import { baseQuery } from "./authAPI";
+
+import {
+    AddLinkPayload,
+    DeleteLinkPayload,
+    ReorderLinksPayload,
+    UpdateLinkPayload,
+} from "../types";
+import { customBaseQuery } from "./authAPI";
 
 export const linkApi = createApi({
     reducerPath: "linkApi",
-    baseQuery,
+    baseQuery: customBaseQuery,
     endpoints: (builder) => ({
-        getLinks: builder.query({
+        getLinks: builder.query<AddLinkPayload[], void>({
             query: () => "/links",
         }),
-        addLinks: builder.mutation({
+        addLinks: builder.mutation<AddLinkPayload, AddLinkPayload>({
             query: (links) => ({
                 url: "/links",
                 method: "POST",
                 body: links,
             }),
         }),
-        updateLinks: builder.mutation({
+        updateLinks: builder.mutation<UpdateLinkPayload, UpdateLinkPayload>({
             query: (links) => ({
                 url: `/links`,
                 method: "PUT",
                 body: links,
             }),
         }),
-        reorderLinks: builder.mutation({
+        reorderLinks: builder.mutation<
+            ReorderLinksPayload,
+            ReorderLinksPayload
+        >({
             query: (orderedLinks) => ({
                 url: "/links/reorder",
                 method: "POST",
                 body: orderedLinks,
             }),
         }),
-        deleteLink: builder.mutation({
-            query: (linkId) => ({
-                url: `/links/${linkId}`,
+        deleteLink: builder.mutation<void, DeleteLinkPayload>({
+            query: ({ id }) => ({
+                url: `/links/${id}`,
                 method: "DELETE",
             }),
         }),

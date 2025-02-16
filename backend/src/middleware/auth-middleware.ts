@@ -1,6 +1,11 @@
 import { Request, Response, NextFunction } from "express";
-import jwt from "jsonwebtoken";
-import { prisma } from "../db/prisma";
+import {
+    generateAccessToken,
+    verifyAccessToken,
+    verifyRefreshToken,
+} from "../utils/jwt";
+
+import { ACCESS_TOKEN_COOKIE_MAX_AGE } from "../utils/constants";
 
 export interface AuthRequest extends Request {
     user: { id: string };
@@ -11,27 +16,44 @@ export const authenticate = async (
     res: Response,
     next: NextFunction
 ) => {
-    const { authorization } = req.headers;
+    const accessToken = req.cookies.accessToken;
+    const refreshToken = req.cookies.refreshToken;
     const authRequest = req as AuthRequest;
 
-    if (!authorization) {
-        return next({
-            statusCode: 401,
-            message: "Authorization token required",
-        });
+    // Step 1: Try to verify the access token
+    if (accessToken) {
+        const decoded = verifyAccessToken(accessToken);
+        if (decoded) {
+            authRequest.user = { id: decoded.userId };
+            return next();
+        }
     }
 
-    const token = authorization.split(" ")[1];
+    // Step 2: If access token is invalid, try with the refresh token
+    if (refreshToken) {
+        const decoded = await verifyRefreshToken(refreshToken);
 
-    try {
-        const decoded = jwt.verify(
-            token,
-            process.env.JWT_ACCESS_SECRET as string
-        ) as { userId: string };
-        authRequest.user = { id: decoded.userId };
+        if (decoded) {
+            const accessToken = generateAccessToken(decoded.userId);
 
-        next();
-    } catch {
-        next({ statusCode: 401, message: "Request is not authorized" });
+            res.clearCookie("accessToken");
+
+            res.cookie("accessToken", accessToken, {
+                httpOnly: true,
+                secure: true,
+                sameSite: "strict",
+                maxAge: ACCESS_TOKEN_COOKIE_MAX_AGE,
+            });
+
+            authRequest.user = { id: decoded.userId };
+            return next();
+        }
+
+        return next({ statusCode: 403, message: "Forbidden" });
     }
+
+    return next({
+        statusCode: 401,
+        message: "Request is not authorized",
+    });
 };

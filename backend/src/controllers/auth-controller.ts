@@ -1,13 +1,19 @@
 import argon2 from "argon2";
-import jwt from "jsonwebtoken";
-import { generateAccessToken, generateRefreshToken } from "../utils/jwt";
+import {
+    generateAccessToken,
+    generateRefreshToken,
+    verifyRefreshToken,
+} from "../utils/jwt";
 import { Request, Response, NextFunction } from "express";
 import { addDays } from "date-fns";
-import { REFRESH_TOKEN_COOKIE_MAX_AGE } from "../utils/constants";
+import {
+    ACCESS_TOKEN_COOKIE_MAX_AGE,
+    REFRESH_TOKEN_COOKIE_MAX_AGE,
+} from "../utils/constants";
 import { prisma } from "../db/prisma";
 
 // Helper to update user refresh token and the RefreshToken table
-const updateUserRefreshToken = async (
+export const updateUserRefreshToken = async (
     userId: string,
     hashedRefreshToken: string
 ) => {
@@ -34,14 +40,36 @@ const updateUserRefreshToken = async (
 };
 
 // Helper to set only the refresh token in a secure cookie
-const setRefreshTokenCookie = (res: Response, refreshToken: string) => {
-    // Set refresh token in an HTTP-only, secure cookie
-    res.cookie("refreshToken", refreshToken, {
+export const setTokenCookies = (
+    res: Response,
+    accessToken: string,
+    refreshToken: string
+) => {
+    res.clearCookie("accessToken");
+    res.clearCookie("refreshToken");
+
+    res.cookie("accessToken", accessToken, {
         httpOnly: true,
         secure: true,
         sameSite: "strict",
+        maxAge: ACCESS_TOKEN_COOKIE_MAX_AGE,
+    });
+    // Set refresh token in an HTTP-only, secure cookie
+    res.cookie("refreshToken", refreshToken, {
+        httpOnly: true,
+        secure: true, // Secure only in production
+        sameSite: "strict",
         maxAge: REFRESH_TOKEN_COOKIE_MAX_AGE,
     });
+};
+
+export const confirmAuthentication = async (
+    req: Request,
+    res: Response,
+    next: NextFunction
+) => {
+    // If the middleware allows the request to pass through, the user is authenticated
+    res.json({ isAuthenticated: true });
 };
 
 // Register a new user
@@ -78,8 +106,7 @@ export const register = async (
         // Update user and refresh token
         await updateUserRefreshToken(user.id, hashedRefreshToken);
 
-        // Set only the refresh token in the cookie
-        setRefreshTokenCookie(res, refreshToken);
+        setTokenCookies(res, accessToken, refreshToken);
 
         res.status(201).json({ accessToken });
     } catch (error) {
@@ -113,80 +140,11 @@ export const login = async (
         // Update user and refresh token
         await updateUserRefreshToken(user.id, hashedRefreshToken);
 
-        // Set only the refresh token in the cookie
-        setRefreshTokenCookie(res, refreshToken);
+        setTokenCookies(res, accessToken, refreshToken);
 
         res.json({ accessToken });
     } catch (error) {
         next(error);
-    }
-};
-
-// Refresh the access token using the refresh token
-export const refreshToken = async (
-    req: Request,
-    res: Response,
-    next: NextFunction
-) => {
-    const refreshTokenFromCookie = req.cookies.refreshToken;
-
-    if (!refreshTokenFromCookie) {
-        return next({ statusCode: 401, message: "Unauthorized" });
-    }
-
-    try {
-        const decoded = jwt.verify(
-            refreshTokenFromCookie,
-            process.env.JWT_REFRESH_SECRET!
-        ) as { userId: string };
-
-        const user = await prisma.user.findUnique({
-            where: { id: decoded.userId },
-            include: {
-                refreshToken: true, // Include the refreshToken relation in the query
-            },
-        });
-
-        if (!user || !user.refreshToken) {
-            return next({ statusCode: 403, message: "Forbidden" });
-        }
-
-        // Compare the hashed refresh token from the database with the provided token using argon2
-        const isMatch = await argon2.verify(
-            user.refreshToken.hashedToken,
-            refreshTokenFromCookie
-        );
-
-        if (!isMatch) {
-            return next({ statusCode: 403, message: "Forbidden" });
-        }
-
-        if (
-            user.refreshToken?.expiresAt &&
-            new Date() > user.refreshToken.expiresAt
-        ) {
-            return next({
-                statusCode: 403,
-                message: "Refresh token has expired",
-            });
-        }
-
-        // Generate new tokens
-        const accessToken = generateAccessToken(user.id);
-        const refreshToken = generateRefreshToken(user.id);
-
-        // Hash the new refresh token before storing it in the database using argon2
-        const hashedRefreshToken = await argon2.hash(refreshToken);
-
-        // Update user and refresh token with the new refresh token
-        await updateUserRefreshToken(user.id, hashedRefreshToken);
-
-        // Set only the refresh token in the cookie
-        setRefreshTokenCookie(res, refreshToken);
-
-        res.json({ accessToken });
-    } catch (error) {
-        next({ statusCode: 403, message: "Invalid token" });
     }
 };
 
@@ -202,13 +160,14 @@ export const logout = async (
     }
 
     try {
-        const decoded = jwt.verify(
-            refreshToken,
-            process.env.JWT_REFRESH_SECRET!
-        ) as { userId: string };
+        const decoded = (await verifyRefreshToken(refreshToken)) as {
+            userId: string;
+        };
 
         // Remove refresh token from the RefreshToken table
         await prisma.refreshToken.delete({ where: { userId: decoded.userId } });
+
+        res.clearCookie("accessToken");
 
         res.clearCookie("refreshToken");
 

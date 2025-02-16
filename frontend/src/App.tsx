@@ -5,12 +5,22 @@ import Register from "./pages/Register";
 import Login from "./pages/Login";
 import Profile from "./pages/Profile";
 import NotFound from "./pages/NotFound";
-import { ProtectedRoute } from "./components/ProtectedRoute"; // Assuming the ProtectedRoute is in a separate file
 import Links from "./pages/Links";
+import { ProtectedRoute } from "./components/auth/ProtectedRoute";
 import { useAppSelector } from "./store/hooks";
+import { useCheckAuthQuery } from "./store/authAPI";
+import Loader from "./components/common/Loader";
 
 function App() {
-    const isAuthenticated = useAppSelector((state) => !!state.auth.accessToken);
+    const isAuthenticated = useAppSelector(
+        (state) => state.auth.isAuthenticated
+    );
+
+    const { isLoading } = useCheckAuthQuery();
+
+    if (isLoading) {
+        return <Loader />;
+    }
 
     return (
         <BrowserRouter>
